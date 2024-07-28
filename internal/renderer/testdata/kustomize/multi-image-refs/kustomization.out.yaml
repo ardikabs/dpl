@@ -1,0 +1,17 @@
+kind: Kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+images:
+  # Image 'main' is managed by dpl. DO NOT EDIT.
+  # Warning! Direct changes might be overwritten in the next deployment lifecycle.
+  - name: main
+    newName: ghcr.io/ardikabs/etc/mockserver
+    newTag: v1.0.0
+  - name: sidecar
+    newName: ghcr.io/ardikabs/etc/sidecar
+    newTag: latest
+  - name: configReloader
+    newName: ghcr.io/ardikabs/etc/reloader
+    newTag: latest
+resources:
+  - deployment.yaml
+  - service.yaml
