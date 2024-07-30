@@ -1,6 +1,8 @@
 package global
 
-import "github.com/spf13/pflag"
+import (
+	"github.com/spf13/pflag"
+)
 
 const (
 	LOG_VERBOSITY = "v"

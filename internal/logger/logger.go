@@ -1,4 +1,4 @@
-package main
+package logger
 
 import (
 	"fmt"
@@ -8,19 +8,25 @@ import (
 	"strings"
 )
 
-var (
-	globalLogLevel = slog.Level(-10)
+var defaultLevel slog.LevelVar
 
-	defaultLogHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: globalLogLevel,
+func SetLevel(lvl int) {
+	defaultLevel.Set(slog.Level(-lvl))
+}
+
+func Handler() slog.Handler {
+	opts := &slog.HandlerOptions{
+		Level: &defaultLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == "level" {
 				return replaceLogLevelAttr(a)
 			}
 			return a
 		},
-	})
-)
+	}
+
+	return slog.NewTextHandler(os.Stdout, opts)
+}
 
 func replaceLogLevelAttr(lvl slog.Attr) slog.Attr {
 	lvl.Key = "v"

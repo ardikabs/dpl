@@ -22,7 +22,7 @@ func (c *Client) watch(ctx context.Context, app *applicationv1.Application, cond
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(options.TimeoutSec)*time.Second)
 	defer cancel()
 
-	log := options.Logger.WithValues("operation", "sync/watch")
+	log := options.Logger.WithValues("operation", "watch")
 
 	var unknownRetryCount uint
 
@@ -44,7 +44,7 @@ func (c *Client) watch(ctx context.Context, app *applicationv1.Application, cond
 					}
 
 					// Trigger refresh
-					if _, err := c.getApplicationWithName(ctx, app.Name); err != nil {
+					if _, err := c.getApplication(ctx, app.Name); err != nil {
 						return err
 					}
 
@@ -56,7 +56,11 @@ func (c *Client) watch(ctx context.Context, app *applicationv1.Application, cond
 			}
 
 			if good {
-				log.Info("watch completed", "status", app.Status.Sync.Status)
+				log.Info("all good, watch completed",
+					"sync.status", app.Status.Sync.Status,
+					"health.status", app.Status.Health.Status,
+					"revision", app.Status.GetRevisions()[0],
+				)
 				return nil
 			}
 

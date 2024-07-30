@@ -2,8 +2,10 @@ package exec
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ardikabs/dpl/internal/git"
 	"github.com/ardikabs/dpl/internal/manager"
@@ -11,6 +13,7 @@ import (
 	"github.com/ardikabs/dpl/internal/renderer"
 	"github.com/ardikabs/dpl/internal/types"
 	"github.com/go-logr/logr"
+	"github.com/google/uuid"
 )
 
 type execInstance struct {
@@ -54,38 +57,34 @@ func newExecInstance(log logr.Logger, params *parameters) (*execInstance, error)
 }
 
 func (ins *execInstance) Exec(ctx context.Context) error {
-	log := ins.Logger.WithName("instance.Start")
+	imageDefinition := ins.Params.GetImageDefinition()
 
-	reqOpts := &manager.ReleaseRequestBuilderOptions{
-		SelectorKeyForRelease:     ins.Params.SelectorForRelease,
-		SelectorKeyForEnvironment: ins.Params.SelectorForEnvironment,
-		SelectorKeyForCluster:     ins.Params.SelectorForCluster,
-	}
-	reqBuilder := manager.NewReleaseRequestBuilderWithOptions(reqOpts).
-		SetReleaseSelector(ins.Params.ReleaseName).
-		SetEnvironmentSelector(ins.Params.Environment)
+	reqID := uuid.New().String()
+	log := ins.Logger.WithName("instance.Start").WithValues(
+		"release", ins.Params.ReleaseName,
+		"environment", ins.Params.Environment,
+		"image", imageDefinition.String(),
+		"requestID", reqID,
+	)
 
-	if ins.Params.Cluster != "" {
-		reqBuilder = reqBuilder.SetClusterSelector(ins.Params.Cluster)
-	}
-
-	relReq := reqBuilder.Build()
-	rel, err := ins.Manager.GetRelease(ctx, relReq, manager.WithLogger(log))
+	req, err := manager.NewListReleaseRequestBuilder().
+		SetReleaseSelector(ins.Params.SelectorForRelease, ins.Params.ReleaseName).
+		SetEnvironmentSelector(ins.Params.SelectorForEnvironment, ins.Params.Environment).
+		SetClusterSelector(ins.Params.SelectorForCluster, ins.Params.Cluster).
+		Build()
 	if err != nil {
 		return err
 	}
 
-	imageDefinition := ins.Params.GetImageDefinition()
+	releases, err := ins.Manager.ListReleases(ctx, req, manager.WithLogger(log))
+	if err != nil {
+		return err
+	}
 
-	log = log.WithValues(
-		"releaseID", rel.ID,
-		"release", rel.Name,
-		"cluster", rel.Cluster,
-		"gitURL", rel.GitURL,
-		"gitRevision", rel.GitRevision,
-		"gitPath", rel.GitPath,
-		"image", imageDefinition.String(),
-	)
+	gitURL := types.ListReleases(releases).GetGitURL()
+	gitRevision := types.ListReleases(releases).GetGitRevision()
+
+	log = log.WithValues("gitURL", gitURL, "gitRevision", gitRevision)
 
 	workspace, err := os.MkdirTemp("/tmp", "dpl-*")
 	if err != nil {
@@ -93,33 +92,51 @@ func (ins *execInstance) Exec(ctx context.Context) error {
 	}
 	defer os.RemoveAll(workspace)
 
-	repo, err := ins.Git.Clone(ctx, rel.GitURL, workspace, git.WithCloneBranch(rel.GitRevision), git.WithCloneLogger(log))
+	repo, err := ins.Git.Clone(ctx, gitURL, workspace, git.WithCloneBranch(gitRevision), git.WithCloneLogger(log))
 	if err != nil {
 		return err
 	}
 
-	workdir := filepath.Join(repo.Root(), rel.GitPath)
-	if err := ins.Renderer.Render(workdir, ins.Params.ReleaseName, &renderer.KustomizeParams{
-		KustomizationRef:   ins.Params.KustomizationFileRef,
-		ImageReferenceName: ins.Params.KustomizationImageRef,
-		ImageName:          imageDefinition.Name,
-		ImageTag:           imageDefinition.Tag,
-	}, renderer.WithLogger(log)); err != nil {
-		return err
+	for _, rel := range releases {
+		log = log.WithValues("id", rel.ID, "cluster", rel.Cluster, "gitPath", rel.GitPath)
+		rendererOpts := []renderer.RenderOption{
+			renderer.WithLogger(log),
+		}
+
+		if ins.Params.IsTriggerRestart {
+			rendererOpts = append(rendererOpts, renderer.WithExternalAnnotations(map[string]string{
+				"dpl/restartedAt": time.Now().Format(time.RFC3339),
+			}))
+		}
+
+		workdir := filepath.Join(repo.Root(), rel.GitPath)
+		if err := ins.Renderer.Render(workdir, ins.Params.ReleaseName, &renderer.KustomizeParams{
+			KustomizationRef:   ins.Params.KustomizationFileRef,
+			ImageReferenceName: ins.Params.KustomizationImageRef,
+			ImageName:          imageDefinition.Name,
+			ImageTag:           imageDefinition.Tag,
+		}, rendererOpts...); err != nil {
+			return err
+		}
 	}
 
-	if err := repo.CommitAndPush(ctx,
-		git.WithCommitMessage("dpl: update deployment manifest"),
+	if err := repo.Commit(ctx,
+		git.WithCommitMessage(fmt.Sprintf("dpl(%s): update deployment manifest", reqID)),
 		git.WithCommitter("kadabra-bot", "me@ardikabs"),
-		git.WithCommitPath(rel.GitPath),
+		git.WithCommitPath("."),
 		git.WithCommitLogger(log),
 	); err != nil {
 		return err
 	}
 
-	if err := ins.Manager.SyncRelease(ctx, relReq, manager.WithLogger(log)); err != nil {
+	if err := repo.Push(ctx, git.WithPushLogger(log)); err != nil {
 		return err
 	}
 
+	if err := ins.Manager.SyncReleases(ctx, releases, manager.WithLogger(log)); err != nil {
+		return err
+	}
+
+	log.Info("deployment executed successfully")
 	return nil
 }

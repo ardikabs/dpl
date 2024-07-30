@@ -11,5 +11,6 @@ type Interface interface {
 type Repository interface {
 	Root() string
 	Pull(ctx context.Context, opts ...PullOption) error
-	CommitAndPush(ctx context.Context, opts ...CommitOption) error
+	Commit(ctx context.Context, opts ...CommitOption) error
+	Push(ctx context.Context, opts ...PushOption) error
 }

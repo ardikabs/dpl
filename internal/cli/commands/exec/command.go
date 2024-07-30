@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/ardikabs/dpl/internal/cli/global"
+	"github.com/ardikabs/dpl/internal/logger"
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
@@ -77,7 +78,7 @@ $ dpl exec --environment staging --image ghcr.io/ardikabs/app/myapp:latest myapp
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log = log.V(global.GetLogLevel(cmd.Flags()))
+			logger.SetLevel(global.GetLogLevel(cmd.Flags()))
 
 			if err := params.ParseArgs(args); err != nil {
 				return err
@@ -97,7 +98,7 @@ $ dpl exec --environment staging --image ghcr.io/ardikabs/app/myapp:latest myapp
 	}
 
 	if err := params.Attach(cmd.Flags()); err != nil {
-		log.Error(err, "failed to attach command flags", "command", cmd.Use)
+		log.Error(err, "failed to attach command flags")
 		os.Exit(1)
 	}
 

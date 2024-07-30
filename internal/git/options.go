@@ -8,10 +8,16 @@ import (
 	"github.com/go-logr/logr"
 )
 
+type defaultOptions struct {
+	RequestID string
+	Logger    logr.Logger
+}
+
 type CloneOptions struct {
+	defaultOptions
+
 	SingleBranch bool
 	Reference    plumbing.ReferenceName
-	Logger       logr.Logger
 }
 
 func NewDefaultCloneOptions() *CloneOptions {
@@ -36,11 +42,13 @@ func WithCloneLogger(logger logr.Logger) CloneOption {
 }
 
 type CommitOptions struct {
+	defaultOptions
+
 	Paths     []string
 	Message   string
 	Committer *object.Signature
 
-	Logger logr.Logger
+	IsResetOnPushError bool
 }
 
 type CommitOption func(*CommitOptions)
@@ -89,14 +97,32 @@ func WithCommitLogger(logger logr.Logger) CommitOption {
 	}
 }
 
+func WithCommitResetOnPushError() CommitOption {
+	return func(o *CommitOptions) {
+		o.IsResetOnPushError = true
+	}
+}
+
 type PullOptions struct {
-	Logger logr.Logger
+	defaultOptions
 }
 
 type PullOption func(*PullOptions)
 
 func WithPullLogger(logger logr.Logger) PullOption {
 	return func(o *PullOptions) {
+		o.Logger = logger
+	}
+}
+
+type PushOptions struct {
+	defaultOptions
+}
+
+type PushOption func(*PushOptions)
+
+func WithPushLogger(logger logr.Logger) PushOption {
+	return func(o *PushOptions) {
 		o.Logger = logger
 	}
 }

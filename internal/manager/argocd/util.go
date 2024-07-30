@@ -11,53 +11,86 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func appToRelease(req *manager.ReleaseRequest, app *applicationv1.Application) *types.Release {
-	return &types.Release{
-		ID:          app.Name,
-		Name:        req.GetReleaseFrom(app.Labels),
-		Environment: req.GetEnvironmentFrom(app.Labels),
-		Cluster:     req.GetClusterFrom(app.Labels),
-		GitURL:      app.Spec.Source.RepoURL,
-		GitPath:     app.Spec.Source.Path,
-		GitRevision: app.Spec.Source.TargetRevision,
+func appsToReleases(req *manager.ListReleaseRequest, apps []applicationv1.Application) ([]*types.Release, error) {
+	if len(apps) == 0 {
+		return nil, ErrArgoCDApplicationNotExists
 	}
+
+	var gitRepoURL, gitRevision string
+	releases := make([]*types.Release, 0, len(apps))
+
+	for _, app := range apps {
+		if gitRepoURL == "" && gitRevision == "" {
+			gitRepoURL = app.Spec.Source.RepoURL
+			gitRevision = app.Spec.Source.TargetRevision
+		} else if gitRepoURL != app.Spec.Source.RepoURL || gitRevision != app.Spec.Source.TargetRevision {
+			return nil, ErrGitRepoAndRevisionMismatch
+		}
+
+		releases = append(releases, &types.Release{
+			ID:          app.Name,
+			Name:        req.GetReleaseFrom(app.Labels),
+			Environment: req.GetEnvironmentFrom(app.Labels),
+			Cluster:     req.GetClusterFrom(app.Labels),
+			GitURL:      app.Spec.Source.RepoURL,
+			GitPath:     app.Spec.Source.Path,
+			GitRevision: app.Spec.Source.TargetRevision,
+		})
+	}
+
+	return releases, nil
 }
 
-func checkAppSyncStatus(logger logr.Logger, app applicationv1.Application) (bool, error) {
-	log := logger.WithValues("sync.status", app.Status.Sync.Status)
+func checkAppStatus(logger logr.Logger, app applicationv1.Application) (bool, error) {
+	log := logger.WithValues("sync.status", app.Status.Sync.Status, "health.status", app.Status.Health.Status)
 
+	log.Info("application reconciliation is on progress")
+
+	synced, err := checkAppSyncStatus(log, app)
+	if err != nil {
+		return false, err
+	}
+
+	healthy, err := checkAppHealthStatus(log, app)
+	if err != nil {
+		return false, err
+	}
+
+	return synced && healthy, nil
+
+}
+
+func checkAppSyncStatus(log logr.Logger, app applicationv1.Application) (bool, error) {
 	switch app.Status.Sync.Status {
 	case applicationv1.SyncStatusCodeSynced:
-		log.Info("application is synced")
+		log.V(1).Info("application is synced")
 		return true, nil
 	case applicationv1.SyncStatusCodeUnknown:
-		log.Info("application sync status is unknown")
+		log.V(1).Info("application sync status is unknown")
 		return false, ErrStatusSyncUnknown
 	case applicationv1.SyncStatusCodeOutOfSync:
-		log.Info("application is on out-of-sync state")
+		log.V(1).Info("application is on out-of-sync state")
 	}
 
 	return false, nil
 }
 
-func checkAppHealthStatus(logger logr.Logger, app applicationv1.Application) (bool, error) {
-	log := logger.WithValues("health.status", app.Status.Health.Status)
-
+func checkAppHealthStatus(log logr.Logger, app applicationv1.Application) (bool, error) {
 	switch app.Status.Health.Status {
 	case health.HealthStatusHealthy:
-		log.Info("application is healthy")
+		log.V(1).Info("application is healthy")
 		return true, nil
 	case health.HealthStatusUnknown:
-		log.Info("application health status is unknown")
+		log.V(1).Info("application health status is unknown")
 		return false, ErrStatusSyncUnknown
 	case health.HealthStatusProgressing:
-		log.Info("application health status is progressing")
+		log.V(1).Info("application health status is progressing")
 	case health.HealthStatusSuspended:
-		log.Info("application is suspended")
+		log.V(1).Info("application is suspended")
 	case health.HealthStatusMissing:
-		log.Info("application health status check is failed or missing")
+		log.V(1).Info("application health status check is failed or missing")
 	case health.HealthStatusDegraded:
-		log.Info("application health degraded for some reason, please check")
+		log.V(1).Info("application health degraded for some reason, please check")
 		return false, fmt.Errorf("%w, %s", ErrStatusHealthDegraded, app.Status.Health.Message)
 	}
 

@@ -7,8 +7,9 @@ import (
 )
 
 type RenderOptions struct {
-	CustomWriter io.Writer
-	Logger       logr.Logger
+	ExternalAnnotations map[string]string
+	CustomWriter        io.Writer
+	Logger              logr.Logger
 
 	Namespace string
 }
@@ -30,5 +31,11 @@ func WithCustomWriter(w io.Writer) RenderOption {
 func WithLogger(logger logr.Logger) RenderOption {
 	return func(opts *RenderOptions) {
 		opts.Logger = logger
+	}
+}
+
+func WithExternalAnnotations(annotations map[string]string) RenderOption {
+	return func(opts *RenderOptions) {
+		opts.ExternalAnnotations = annotations
 	}
 }

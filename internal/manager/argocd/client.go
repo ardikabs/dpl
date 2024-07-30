@@ -6,23 +6,24 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/ardikabs/dpl/internal/manager"
+	"github.com/ardikabs/dpl/internal/tools/retry"
 	"github.com/ardikabs/dpl/internal/types"
 	"github.com/argoproj/argo-cd/v2/pkg/apiclient"
 	applicationpkg "github.com/argoproj/argo-cd/v2/pkg/apiclient/application"
 	applicationv1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	synccommon "github.com/argoproj/gitops-engine/pkg/sync/common"
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 )
 
 var (
 	ErrArgoCDApplicationNotExists = errors.New("application not exists")
+	ErrGitRepoAndRevisionMismatch = errors.New("git repository and revision must be the same")
 	ErrStatusSyncUnknown          = errors.New("sync status unknown")
 	ErrStatusHealthDegraded       = errors.New("health status degraded")
 	ErrAnotherSyncInProgress      = errors.New("another operation is already in progress")
@@ -53,26 +54,21 @@ func NewClient(cfg types.ArgoConfig) (*Client, error) {
 	return &Client{argocdClient: cl}, nil
 }
 
-func (c *Client) getApplicationWithSelector(ctx context.Context, selector *string) (*applicationv1.Application, error) {
+func (c *Client) listApplications(ctx context.Context, selector string) ([]applicationv1.Application, error) {
 	con, appClient := c.argocdClient.NewApplicationClientOrDie()
 	defer con.Close()
 
 	appList, err := appClient.List(ctx, &applicationpkg.ApplicationQuery{
-		Selector: selector,
-		Refresh:  ptr.To("true"),
+		Selector: ptr.To(selector),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if len(appList.Items) > 0 {
-		return &appList.Items[0], nil
-	}
-
-	return nil, ErrArgoCDApplicationNotExists
+	return appList.Items, nil
 }
 
-func (c *Client) getApplicationWithName(ctx context.Context, appName string) (*applicationv1.Application, error) {
+func (c *Client) getApplication(ctx context.Context, appName string) (*applicationv1.Application, error) {
 	con, appClient := c.argocdClient.NewApplicationClientOrDie()
 	defer con.Close()
 
@@ -87,25 +83,23 @@ func (c *Client) getApplicationWithName(ctx context.Context, appName string) (*a
 	return app, nil
 }
 
-func (c *Client) GetRelease(ctx context.Context, req *manager.ReleaseRequest, opts ...manager.Option) (*types.Release, error) {
+func (c *Client) ListReleases(ctx context.Context, req *manager.ListReleaseRequest, opts ...manager.Option) ([]*types.Release, error) {
 	options := manager.NewDefaultOptions()
 	for _, o := range opts {
 		o(options)
 	}
 
-	log := options.Logger.WithName("argocd.GetRelease").
-		WithValues("selector", ptr.Deref(req.Selector, "N/A"))
-
-	app, err := c.getApplicationWithSelector(ctx, req.Selector)
+	log := options.Logger.WithName("argocd.ListReleases").WithValues("selector", req.Selector)
+	apps, err := c.listApplications(ctx, req.Selector)
 	if err != nil {
 		return nil, err
 	}
 
-	log.V(1).Info("application found", "app", app.Name, "status", app.Status.Sync.Status)
-	return appToRelease(req, app), nil
+	log.V(1).Info("releases found", "releases", len(apps))
+	return appsToReleases(req, apps)
 }
 
-func (c *Client) SyncRelease(ctx context.Context, req *manager.ReleaseRequest, opts ...manager.Option) error {
+func (c *Client) SyncReleases(ctx context.Context, rels []*types.Release, opts ...manager.Option) error {
 	options := manager.NewDefaultOptions()
 	for _, o := range opts {
 		o(options)
@@ -113,66 +107,70 @@ func (c *Client) SyncRelease(ctx context.Context, req *manager.ReleaseRequest, o
 
 	log := options.Logger.WithName("argocd.SyncRelease")
 
-	rel, err := c.GetRelease(ctx, req, manager.WithLogger(log))
-	if err != nil {
-		return err
-	}
+	g, ctx := errgroup.WithContext(ctx)
+	for _, rel := range rels {
+		rel := rel
 
-	conn, appClient := c.argocdClient.NewApplicationClientOrDie()
-	defer conn.Close()
+		g.Go(func() error {
+			conn, appClient := c.argocdClient.NewApplicationClientOrDie()
+			defer conn.Close()
 
-	var currentApp *applicationv1.Application
-	if err := wait.PollUntilContextTimeout(ctx, time.Second, time.Duration(options.TimeoutSec)*time.Second, false, func(ctx context.Context) (bool, error) {
-		var err error
-		currentApp, err = appClient.Sync(ctx, &applicationpkg.ApplicationSyncRequest{
-			Name: ptr.To(rel.ID),
+			currentApp, err := c.getApplication(ctx, rel.ID)
+			if err != nil {
+				return err
+			}
+
+			if err := retry.OnError(ctx, func(err error) bool {
+				if errors.Is(err, ErrAnotherSyncInProgress) {
+					return true
+				}
+				return false
+			}, func(ctx context.Context) error {
+				if _, err := appClient.Sync(ctx, &applicationpkg.ApplicationSyncRequest{Name: ptr.To(rel.ID)}); err != nil {
+					status, ok := status.FromError(err)
+					if !ok {
+						return err
+					}
+
+					if status.Code() == codes.FailedPrecondition ||
+						strings.ToLower(status.Message()) == ErrAnotherSyncInProgress.Error() {
+
+						log.V(1).Info("another sync operation is in progress", "app", rel.ID)
+						return ErrAnotherSyncInProgress
+					}
+					return err
+				}
+
+				return nil
+			},
+				retry.WithRetryIntervalSec(1),
+				retry.WithRetryTimoutSec(int(options.TimeoutSec)),
+				retry.WithLogger(log),
+				retry.WithErrOnTimeout(ErrSyncTimeout),
+			); err != nil {
+				return err
+			}
+
+			log = log.WithValues("app", currentApp.Name)
+			log.Info("application sync is triggered")
+
+			if err := c.watch(ctx, currentApp, watchOnSync,
+				manager.WithTimeoutSec(options.TimeoutSec),
+				manager.WithLogger(log)); err != nil {
+				return err
+			}
+
+			return nil
 		})
-		if err != nil {
-			status, ok := status.FromError(err)
-			if !ok {
-				return false, err
-			}
-
-			if status.Code() == codes.FailedPrecondition ||
-				strings.ToLower(status.Message()) == ErrAnotherSyncInProgress.Error() {
-
-				log.Info(ErrAnotherSyncInProgress.Error())
-				return false, nil
-			}
-
-			return false, err
-		}
-
-		return true, nil
-	}); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return ErrSyncTimeout
-		}
-
-		return err
 	}
 
-	log = log.WithValues("app", currentApp.Name)
-	log.Info("application sync is triggered", "status", currentApp.Status.Sync.Status)
-
-	if err := c.watch(ctx, currentApp, watchOnSync,
-		manager.WithTimeoutSec(options.TimeoutSec),
-		manager.WithLogger(log)); err != nil {
-		return err
-	}
-
-	return nil
+	return g.Wait()
 }
 
 func watchOnSync(log logr.Logger, app applicationv1.Application) (bool, error) {
-	sync, err := checkAppSyncStatus(log, app)
+	good, err := checkAppStatus(log, app)
 	if err != nil {
-		return false, err
-	}
-
-	health, err := checkAppHealthStatus(log, app)
-	if err != nil {
-		return false, err
+		return false, nil
 	}
 
 	state := app.Status.OperationState
@@ -189,10 +187,9 @@ func watchOnSync(log logr.Logger, app applicationv1.Application) (bool, error) {
 					"status", resource.Status,
 				)
 			}
+			return false, fmt.Errorf("sync failed. reason: %s", state.Message)
 		}
-
-		return false, fmt.Errorf("sync failed. reason: %s", state.Message)
 	}
 
-	return sync && health, nil
+	return good, nil
 }

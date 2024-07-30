@@ -7,6 +7,6 @@ import (
 )
 
 type Manager interface {
-	GetRelease(ctx context.Context, req *ReleaseRequest, opts ...Option) (*types.Release, error)
-	SyncRelease(ctx context.Context, req *ReleaseRequest, opts ...Option) error
+	ListReleases(ctx context.Context, req *ListReleaseRequest, opts ...Option) ([]*types.Release, error)
+	SyncReleases(ctx context.Context, rel []*types.Release, opts ...Option) error
 }

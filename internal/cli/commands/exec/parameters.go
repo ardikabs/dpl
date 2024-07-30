@@ -25,6 +25,7 @@ type parameters struct {
 	ArgoCDAuthToken        string `env:"ARGOCD_AUTH_TOKEN"`
 	ArgoCDHost             string `env:"ARGOCD_HOST"`
 	GitSecret              string `env:"GIT_SECRET,required"`
+	IsTriggerRestart       bool
 
 	gitSecret       types.GitSecret
 	imageDefinition types.ImageDefinition
@@ -44,6 +45,7 @@ func (p *parameters) Attach(flagset *flag.FlagSet) error {
 	flagset.StringVar(&p.SelectorForRelease, "selector-for-release", p.SelectorForRelease, "Selector for 'release' attribute")
 	flagset.StringVar(&p.SelectorForEnvironment, "selector-for-environment", p.SelectorForEnvironment, "Selector for 'environment' attribute")
 	flagset.StringVar(&p.SelectorForCluster, "selector-for-cluster", p.SelectorForCluster, "Selector for 'cluster' attribute")
+	flagset.BoolVar(&p.IsTriggerRestart, "restart", p.IsTriggerRestart, "Restart the release")
 
 	return nil
 }

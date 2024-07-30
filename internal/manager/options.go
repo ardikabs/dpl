@@ -27,6 +27,12 @@ func WithTimeoutSec(timeoutSec uint) Option {
 	}
 }
 
+func WithMaxRetryUnknownCount(maxRetryUnknownCount int) Option {
+	return func(opts *Options) {
+		opts.MaxRetryUnknownCount = maxRetryUnknownCount
+	}
+}
+
 func WithLogger(logger logr.Logger) Option {
 	return func(opts *Options) {
 		opts.Logger = logger

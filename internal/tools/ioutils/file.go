@@ -1,4 +1,4 @@
-package tools
+package ioutils
 
 import (
 	"io"

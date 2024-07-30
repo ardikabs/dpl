@@ -1,15 +1,14 @@
 package manager
 
 import (
+	"errors"
 	"fmt"
 	"strings"
-
-	"k8s.io/utils/ptr"
 )
 
 type labelsGetter func(labels map[string]string) string
 
-func createMetaGetter(key string) labelsGetter {
+func createLabelGetter(key string) labelsGetter {
 	return func(labels map[string]string) string {
 		v, ok := labels[key]
 		if !ok {
@@ -20,15 +19,16 @@ func createMetaGetter(key string) labelsGetter {
 	}
 }
 
-type ReleaseRequest struct {
+type ListReleaseRequest struct {
 	releaseGetter     labelsGetter
 	environmentGetter labelsGetter
 	clusterGetter     labelsGetter
+	selectors         []string
 
-	Selector *string
+	Selector string
 }
 
-func (r *ReleaseRequest) GetReleaseFrom(labels map[string]string) string {
+func (r *ListReleaseRequest) GetReleaseFrom(labels map[string]string) string {
 	if r.releaseGetter == nil {
 		return ""
 	}
@@ -36,7 +36,7 @@ func (r *ReleaseRequest) GetReleaseFrom(labels map[string]string) string {
 	return r.releaseGetter(labels)
 }
 
-func (r *ReleaseRequest) GetClusterFrom(labels map[string]string) string {
+func (r *ListReleaseRequest) GetClusterFrom(labels map[string]string) string {
 	if r.clusterGetter == nil {
 		return ""
 	}
@@ -44,7 +44,7 @@ func (r *ReleaseRequest) GetClusterFrom(labels map[string]string) string {
 	return r.clusterGetter(labels)
 }
 
-func (r *ReleaseRequest) GetEnvironmentFrom(labels map[string]string) string {
+func (r *ListReleaseRequest) GetEnvironmentFrom(labels map[string]string) string {
 	if r.environmentGetter == nil {
 		return ""
 	}
@@ -52,78 +52,60 @@ func (r *ReleaseRequest) GetEnvironmentFrom(labels map[string]string) string {
 	return r.environmentGetter(labels)
 }
 
-type ReleaseRequestBuilder struct {
-	releaseSelectorKey   string
-	releaseSelectorValue string
-
-	environmentSelectorKey   string
-	environmentSelectorValue string
-
-	clusterSelectorKey   string
-	clusterSelectorValue string
+type ListReleaseRequestBuilder struct {
+	req *ListReleaseRequest
 }
 
-func NewReleaseRequestBuilder() *ReleaseRequestBuilder {
-	return &ReleaseRequestBuilder{
-		releaseSelectorKey:     "platform.ardikabs.com/release",
-		environmentSelectorKey: "platform.ardikabs.com/environment",
-		clusterSelectorKey:     "platform.ardikabs.com/cluster",
+func NewListReleaseRequestBuilder() *ListReleaseRequestBuilder {
+	return &ListReleaseRequestBuilder{
+		req: &ListReleaseRequest{},
 	}
 }
 
-type ReleaseRequestBuilderOptions struct {
-	SelectorKeyForRelease     string
-	SelectorKeyForEnvironment string
-	SelectorKeyForCluster     string
-}
+func (b *ListReleaseRequestBuilder) SetReleaseSelector(key, value string) *ListReleaseRequestBuilder {
+	b.req.releaseGetter = createLabelGetter(key)
 
-func NewReleaseRequestBuilderWithOptions(opts *ReleaseRequestBuilderOptions) *ReleaseRequestBuilder {
-	b := NewReleaseRequestBuilder()
-	b.releaseSelectorKey = opts.SelectorKeyForRelease
-	b.environmentSelectorKey = opts.SelectorKeyForEnvironment
-	b.clusterSelectorKey = opts.SelectorKeyForCluster
+	if value == "" {
+		return b
+	}
+
+	b.req.selectors = append(b.req.selectors, key, value)
 	return b
 }
 
-func (b *ReleaseRequestBuilder) SetReleaseSelector(value string) *ReleaseRequestBuilder {
-	b.releaseSelectorValue = value
+func (b *ListReleaseRequestBuilder) SetEnvironmentSelector(key, value string) *ListReleaseRequestBuilder {
+	b.req.environmentGetter = createLabelGetter(key)
+
+	if value == "" {
+		return b
+	}
+
+	b.req.selectors = append(b.req.selectors, key, value)
 	return b
 }
 
-func (b *ReleaseRequestBuilder) SetEnvironmentSelector(value string) *ReleaseRequestBuilder {
-	b.environmentSelectorValue = value
+func (b *ListReleaseRequestBuilder) SetClusterSelector(key, value string) *ListReleaseRequestBuilder {
+	b.req.clusterGetter = createLabelGetter(key)
+
+	if value == "" {
+		return b
+	}
+
+	b.req.selectors = append(b.req.selectors, key, value)
 	return b
 }
 
-func (b *ReleaseRequestBuilder) SetClusterSelector(value string) *ReleaseRequestBuilder {
-	b.clusterSelectorValue = value
-	return b
-}
-
-func (b *ReleaseRequestBuilder) Build() *ReleaseRequest {
-	req := &ReleaseRequest{
-		environmentGetter: createMetaGetter(b.environmentSelectorKey),
-		releaseGetter:     createMetaGetter(b.releaseSelectorKey),
-		clusterGetter:     createMetaGetter(b.environmentSelectorKey),
+func (b *ListReleaseRequestBuilder) Build() (*ListReleaseRequest, error) {
+	if len(b.req.selectors)%2 != 0 {
+		return nil, fmt.Errorf("%w, selector must be in the form of key-value pairs: %v", errors.New("invalid selectors"), b.req.selectors)
 	}
 
-	var selectors []string
-
-	if b.releaseSelectorValue != "" {
-		selectors = append(selectors, fmt.Sprintf("%s=%s", b.releaseSelectorKey, b.releaseSelectorValue))
+	var s []string
+	for i := 0; i < len(b.req.selectors); i += 2 {
+		s = append(s, b.req.selectors[i]+"="+b.req.selectors[i+1])
 	}
 
-	if b.environmentSelectorValue != "" {
-		selectors = append(selectors, fmt.Sprintf("%s=%s", b.environmentSelectorKey, b.environmentSelectorValue))
-	}
+	b.req.Selector = strings.Join(s, ",")
 
-	if b.clusterSelectorValue != "" {
-		selectors = append(selectors, fmt.Sprintf("%s=%s", b.clusterSelectorKey, b.clusterSelectorValue))
-	}
-
-	if len(selectors) > 0 {
-		req.Selector = ptr.To(strings.Join(selectors, ","))
-	}
-
-	return req
+	return b.req, nil
 }
