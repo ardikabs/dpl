@@ -107,6 +107,11 @@ func (k *Kustomize) Render(workdir string, releaseName string, params interface{
 	// If custom writer is specified, it will use the custom writer instead of the file writer.
 	// This is useful for testing purposes.
 	if o.CustomWriter != nil {
+		// With the custom writer in place, the original content need to be rewritten back to its original file
+		if _, err := kustFile.Write(content); err != nil {
+			return err
+		}
+
 		enc = goyaml.NewEncoder(o.CustomWriter)
 	}
 

@@ -20,7 +20,7 @@ func New(log logr.Logger) *cobra.Command {
 		},
 	}
 
-	global.SetFlags(cmd.PersistentFlags())
+	global.AttachFlags(cmd.PersistentFlags())
 
 	cmd.AddCommand(version.NewCommand())
 	cmd.AddCommand(exec.NewCommand(log))

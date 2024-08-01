@@ -2,10 +2,15 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ardikabs/dpl/internal/errs"
 	"k8s.io/apimachinery/pkg/util/wait"
+)
+
+var (
+	ErrTimeout = errors.New("timed out waiting for the function to complete")
 )
 
 type RetriableFn func(error) bool
@@ -24,7 +29,7 @@ func OnError(ctx context.Context, retriable RetriableFn, fn func(ctx context.Con
 
 	log := options.Logger.WithName("retry.OnError")
 
-	conditionalFunc := func(ctx context.Context) (done bool, err error) {
+	conditional := func(ctx context.Context) (done bool, err error) {
 		err = fn(ctx)
 
 		switch {
@@ -40,14 +45,9 @@ func OnError(ctx context.Context, retriable RetriableFn, fn func(ctx context.Con
 		}
 	}
 
-	err := wait.PollUntilContextTimeout(ctx, options.Interval, options.Timeout, false, conditionalFunc)
+	err := wait.PollUntilContextTimeout(ctx, options.Interval, options.Timeout, false, conditional)
 	if errs.IsAny(err, context.DeadlineExceeded) {
-		log.Error(err, "retry failed cause of timeout is exceeded")
-
-		err = lastErr
-		if options.ErrOnTimeout != nil {
-			err = options.ErrOnTimeout
-		}
+		return errors.Join(lastErr, ErrTimeout)
 	}
 
 	return err

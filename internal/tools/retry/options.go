@@ -7,10 +7,9 @@ import (
 )
 
 type RetryOptions struct {
-	Interval     time.Duration
-	Timeout      time.Duration
-	Logger       logr.Logger
-	ErrOnTimeout error
+	Interval time.Duration
+	Timeout  time.Duration
+	Logger   logr.Logger
 }
 
 type RetryOption func(*RetryOptions)
@@ -30,11 +29,5 @@ func WithRetryTimoutSec(timeoutSec int) RetryOption {
 func WithLogger(logger logr.Logger) RetryOption {
 	return func(o *RetryOptions) {
 		o.Logger = logger
-	}
-}
-
-func WithErrOnTimeout(err error) RetryOption {
-	return func(o *RetryOptions) {
-		o.ErrOnTimeout = err
 	}
 }

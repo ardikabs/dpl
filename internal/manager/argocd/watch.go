@@ -3,9 +3,9 @@ package argocd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
+	"github.com/ardikabs/dpl/internal/errs"
 	"github.com/ardikabs/dpl/internal/manager"
 	applicationv1 "github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1"
 	"github.com/go-logr/logr"
@@ -38,7 +38,7 @@ func (c *Client) watch(ctx context.Context, app *applicationv1.Application, cond
 			app := ev.Application
 			good, err := condition(log, app)
 			if err != nil {
-				if errors.Is(err, ErrStatusSyncUnknown) {
+				if errs.IsAny(err, ErrStatusSyncUnknown) {
 					if unknownRetryCount > uint(options.MaxRetryUnknownCount) {
 						return err
 					}
@@ -66,7 +66,7 @@ func (c *Client) watch(ctx context.Context, app *applicationv1.Application, cond
 
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return fmt.Errorf("watch timeout is exceeded")
+				return ErrSyncOnWatchTimeout
 			}
 
 			return nil

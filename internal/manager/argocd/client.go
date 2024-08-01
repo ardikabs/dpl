@@ -3,10 +3,10 @@ package argocd
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 
+	"github.com/ardikabs/dpl/internal/errs"
 	"github.com/ardikabs/dpl/internal/manager"
 	"github.com/ardikabs/dpl/internal/tools/retry"
 	"github.com/ardikabs/dpl/internal/types"
@@ -27,7 +27,9 @@ var (
 	ErrStatusSyncUnknown          = errors.New("sync status unknown")
 	ErrStatusHealthDegraded       = errors.New("health status degraded")
 	ErrAnotherSyncInProgress      = errors.New("another operation is already in progress")
-	ErrSyncTimeout                = errors.New("sync timeout is exceeded")
+	ErrSyncOperationTimeout       = errors.New("sync operation timeout is exceeded")
+	ErrSyncOnWatchTimeout         = errors.New("watch operation timeout is exceeded")
+	ErrSyncFailed                 = errors.New("sync failed")
 )
 
 type client interface {
@@ -121,7 +123,7 @@ func (c *Client) SyncReleases(ctx context.Context, rels []*types.Release, opts .
 			}
 
 			if err := retry.OnError(ctx, func(err error) bool {
-				if errors.Is(err, ErrAnotherSyncInProgress) {
+				if errs.IsAny(err, ErrAnotherSyncInProgress) {
 					return true
 				}
 				return false
@@ -146,8 +148,12 @@ func (c *Client) SyncReleases(ctx context.Context, rels []*types.Release, opts .
 				retry.WithRetryIntervalSec(1),
 				retry.WithRetryTimoutSec(int(options.TimeoutSec)),
 				retry.WithLogger(log),
-				retry.WithErrOnTimeout(ErrSyncTimeout),
 			); err != nil {
+				if errs.IsAny(err, retry.ErrTimeout) {
+					log.V(1).Info("sync operation is timed out", "app", rel.ID)
+					return ErrSyncOperationTimeout
+				}
+
 				return err
 			}
 
@@ -187,7 +193,7 @@ func watchOnSync(log logr.Logger, app applicationv1.Application) (bool, error) {
 					"status", resource.Status,
 				)
 			}
-			return false, fmt.Errorf("sync failed. reason: %s", state.Message)
+			return false, errs.Wrapf(ErrSyncFailed, "reason: %s", state.Message)
 		}
 	}
 
