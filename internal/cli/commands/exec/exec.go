@@ -19,8 +19,8 @@ import (
 type execInstance struct {
 	Params   *parameters
 	Git      git.Interface
-	Manager  manager.Manager
-	Renderer renderer.Renderer
+	Manager  manager.Interface
+	Renderer renderer.Interface
 	Logger   logr.Logger
 }
 
@@ -41,16 +41,10 @@ func newExecInstance(log logr.Logger, params *parameters) (*execInstance, error)
 		return nil, err
 	}
 
-	var rdr renderer.Renderer
-	switch params.Profile {
-	case "kustomize":
-		rdr = new(renderer.Kustomize)
-	}
-
 	return &execInstance{
 		Git:      g,
 		Manager:  argo,
-		Renderer: rdr,
+		Renderer: renderer.New(params.Profile),
 		Logger:   log,
 		Params:   params,
 	}, nil
@@ -60,12 +54,14 @@ func (ins *execInstance) Exec(ctx context.Context) error {
 	imageDefinition := ins.Params.GetImageDefinition()
 
 	reqID := uuid.New().String()
-	log := ins.Logger.WithName("instance.Start").WithValues(
-		"release", ins.Params.ReleaseName,
-		"environment", ins.Params.Environment,
-		"image", imageDefinition.String(),
-		"requestID", reqID,
-	)
+	log := ins.Logger.
+		WithName("exec").
+		WithValues(
+			"release", ins.Params.ReleaseName,
+			"environment", ins.Params.Environment,
+			"image", imageDefinition.String(),
+			"requestID", reqID,
+		)
 
 	req, err := manager.NewListReleaseRequestBuilder().
 		SetReleaseSelector(ins.Params.SelectorForRelease, ins.Params.ReleaseName).
@@ -81,8 +77,8 @@ func (ins *execInstance) Exec(ctx context.Context) error {
 		return err
 	}
 
-	gitURL := types.ListReleases(releases).GetGitURL()
-	gitRevision := types.ListReleases(releases).GetGitRevision()
+	gitURL := releases.GetGitURL()
+	gitRevision := releases.GetGitRevision()
 
 	log = log.WithValues("gitURL", gitURL, "gitRevision", gitRevision)
 
@@ -98,7 +94,7 @@ func (ins *execInstance) Exec(ctx context.Context) error {
 	}
 
 	for _, rel := range releases {
-		log = log.WithValues("id", rel.ID, "cluster", rel.Cluster, "gitPath", rel.GitPath)
+		log := log.WithValues("id", rel.ID, "cluster", rel.Cluster, "gitPath", rel.GitPath)
 		rendererOpts := []renderer.RenderOption{
 			renderer.WithLogger(log),
 		}

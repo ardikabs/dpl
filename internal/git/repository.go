@@ -10,8 +10,6 @@ import (
 	"github.com/ardikabs/dpl/internal/tools/cmdutils"
 	"github.com/ardikabs/dpl/internal/tools/retry"
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-logr/logr"
@@ -22,29 +20,26 @@ var (
 	ErrPushFailed = errors.New("failed to push to remote repository")
 )
 
-type gitRepo interface {
-	Head() (*plumbing.Reference, error)
-	Worktree() (*git.Worktree, error)
-	Push(o *git.PushOptions) error
-	Config() (*config.Config, error)
-	SetConfig(cfg *config.Config) error
-}
-
 type GitRepository struct {
-	gitRepo gitRepo
-	auth    transport.AuthMethod
+	repo *git.Repository
+	auth transport.AuthMethod
 }
 
-func NewGitRepository(repo gitRepo, auth transport.AuthMethod) *GitRepository {
-
-	return &GitRepository{
-		gitRepo: repo,
-		auth:    auth,
+func NewGitRepository(repo *git.Repository, auth transport.AuthMethod) (*GitRepository, error) {
+	r := &GitRepository{
+		repo: repo,
+		auth: auth,
 	}
+
+	if err := r.setGitRepoConfig(); err != nil {
+		return nil, err
+	}
+
+	return r, nil
 }
 
 func (g *GitRepository) Root() string {
-	worktree, err := g.gitRepo.Worktree()
+	worktree, err := g.repo.Worktree()
 	if err != nil {
 		return "UNDEFINED"
 	}
@@ -60,7 +55,7 @@ func (g *GitRepository) Pull(ctx context.Context, opts ...PullOption) error {
 
 	log := o.Logger.WithName("repository.Pull")
 
-	worktree, err := g.gitRepo.Worktree()
+	worktree, err := g.repo.Worktree()
 	if err != nil {
 		return err
 	}
@@ -81,11 +76,7 @@ func (g *GitRepository) Pull(ctx context.Context, opts ...PullOption) error {
 func (g *GitRepository) rawPull(ctx context.Context, log logr.Logger) error {
 	log = log.WithName("repository.rawPull")
 
-	if err := g.setGitRepoConfig(); err != nil {
-		return err
-	}
-
-	head, err := g.gitRepo.Head()
+	head, err := g.repo.Head()
 	if err != nil {
 		return err
 	}
@@ -112,7 +103,7 @@ func (g *GitRepository) Commit(ctx context.Context, opts ...CommitOption) error 
 
 	log := o.Logger.WithName("repository.Commit")
 
-	worktree, err := g.gitRepo.Worktree()
+	worktree, err := g.repo.Worktree()
 	if err != nil {
 		return err
 	}
@@ -170,7 +161,7 @@ func (g *GitRepository) Push(ctx context.Context, opts ...PushOption) error {
 		}
 
 		log.V(2).Info("push changes to remote repository")
-		if err := g.gitRepo.Push(&git.PushOptions{Auth: g.auth}); err != nil {
+		if err := g.repo.Push(&git.PushOptions{Auth: g.auth}); err != nil {
 			if !errs.IsAny(err, git.NoErrAlreadyUpToDate, transport.ErrEmptyRemoteRepository) {
 				return errs.Wrap(err, ErrPushFailed)
 			}
@@ -193,7 +184,7 @@ func (g *GitRepository) Push(ctx context.Context, opts ...PushOption) error {
 }
 
 func (g *GitRepository) setGitRepoConfig() error {
-	cfg, err := g.gitRepo.Config()
+	cfg, err := g.repo.Config()
 	if err != nil {
 		return err
 	}
@@ -202,9 +193,14 @@ func (g *GitRepository) setGitRepoConfig() error {
 		if remote.Name != RemoteName && len(remote.URLs) == 0 {
 			continue
 		}
+
 		if httpAuth, ok := g.auth.(*http.BasicAuth); ok {
 			url := remote.URLs[0]
 			urlParts := strings.Split(url, "://")
+			if len(urlParts) != 2 {
+				continue
+			}
+
 			remote.URLs = []string{fmt.Sprintf("%s://%s:%s@%s", urlParts[0], httpAuth.Username, httpAuth.Password, urlParts[1])}
 		}
 
@@ -214,5 +210,9 @@ func (g *GitRepository) setGitRepoConfig() error {
 		branch.Rebase = "true"
 	}
 
-	return g.gitRepo.SetConfig(cfg)
+	if err := g.repo.SetConfig(cfg); err != nil {
+		return err
+	}
+
+	return nil
 }

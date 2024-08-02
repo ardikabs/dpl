@@ -85,13 +85,10 @@ func (c *Client) getApplication(ctx context.Context, appName string) (*applicati
 	return app, nil
 }
 
-func (c *Client) ListReleases(ctx context.Context, req *manager.ListReleaseRequest, opts ...manager.Option) ([]*types.Release, error) {
-	options := manager.NewDefaultOptions()
-	for _, o := range opts {
-		o(options)
-	}
+func (c *Client) ListReleases(ctx context.Context, req *manager.ListReleaseRequest, opts ...manager.Option) (types.ListReleases, error) {
+	o := manager.NewDefaultOptions(opts...)
 
-	log := options.Logger.WithName("argocd.ListReleases").WithValues("selector", req.Selector)
+	log := o.Logger.WithName("argocd.ListReleases").WithValues("selector", req.Selector)
 	apps, err := c.listApplications(ctx, req.Selector)
 	if err != nil {
 		return nil, err
@@ -101,76 +98,90 @@ func (c *Client) ListReleases(ctx context.Context, req *manager.ListReleaseReque
 	return appsToReleases(req, apps)
 }
 
-func (c *Client) SyncReleases(ctx context.Context, rels []*types.Release, opts ...manager.Option) error {
-	options := manager.NewDefaultOptions()
-	for _, o := range opts {
-		o(options)
-	}
+func (c *Client) SyncReleases(ctx context.Context, rels types.ListReleases, opts ...manager.Option) error {
+	o := manager.NewDefaultOptions(opts...)
 
-	log := options.Logger.WithName("argocd.SyncRelease")
+	log := o.Logger.WithName("argocd.SyncReleases")
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, rel := range rels {
 		rel := rel
 
 		g.Go(func() error {
-			conn, appClient := c.argocdClient.NewApplicationClientOrDie()
-			defer conn.Close()
-
-			currentApp, err := c.getApplication(ctx, rel.ID)
-			if err != nil {
+			if err := c.SyncRelease(ctx, rel, manager.WithLogger(log)); err != nil {
+				log.Error(err, "sync operation failed", "argocd_application", rel.ID, "cluster", rel.Cluster)
 				return err
 			}
-
-			if err := retry.OnError(ctx, func(err error) bool {
-				if errs.IsAny(err, ErrAnotherSyncInProgress) {
-					return true
-				}
-				return false
-			}, func(ctx context.Context) error {
-				if _, err := appClient.Sync(ctx, &applicationpkg.ApplicationSyncRequest{Name: ptr.To(rel.ID)}); err != nil {
-					status, ok := status.FromError(err)
-					if !ok {
-						return err
-					}
-
-					if status.Code() == codes.FailedPrecondition ||
-						strings.ToLower(status.Message()) == ErrAnotherSyncInProgress.Error() {
-
-						log.V(1).Info("another sync operation is in progress", "app", rel.ID)
-						return ErrAnotherSyncInProgress
-					}
-					return err
-				}
-
-				return nil
-			},
-				retry.WithRetryIntervalSec(1),
-				retry.WithRetryTimoutSec(int(options.TimeoutSec)),
-				retry.WithLogger(log),
-			); err != nil {
-				if errs.IsAny(err, retry.ErrTimeout) {
-					log.V(1).Info("sync operation is timed out", "app", rel.ID)
-					return ErrSyncOperationTimeout
-				}
-
-				return err
-			}
-
-			log = log.WithValues("app", currentApp.Name)
-			log.Info("application sync is triggered")
-
-			if err := c.watch(ctx, currentApp, watchOnSync,
-				manager.WithTimeoutSec(options.TimeoutSec),
-				manager.WithLogger(log)); err != nil {
-				return err
-			}
-
 			return nil
 		})
 	}
 
 	return g.Wait()
+}
+
+func (c *Client) SyncRelease(ctx context.Context, rel *types.Release, opts ...manager.Option) error {
+	o := manager.NewDefaultOptions(opts...)
+
+	log := o.Logger.
+		WithName("argocd.SyncRelease").
+		WithValues(
+			"argocd_application", rel.ID,
+			"cluster", rel.Cluster,
+		)
+
+	conn, appClient := c.argocdClient.NewApplicationClientOrDie()
+	defer conn.Close()
+
+	currentApp, err := c.getApplication(ctx, rel.ID)
+	if err != nil {
+		return err
+	}
+
+	if err := retry.OnError(ctx, func(err error) bool {
+		if errs.IsAny(err, ErrAnotherSyncInProgress) {
+			return true
+		}
+		return false
+	}, func(ctx context.Context) error {
+		if _, err := appClient.Sync(ctx, &applicationpkg.ApplicationSyncRequest{Name: ptr.To(rel.ID)}); err != nil {
+			status, ok := status.FromError(err)
+			if !ok {
+				return err
+			}
+
+			if status.Code() == codes.FailedPrecondition ||
+				strings.ToLower(status.Message()) == ErrAnotherSyncInProgress.Error() {
+
+				log.V(1).Info("another sync operation is in progress")
+				return ErrAnotherSyncInProgress
+			}
+			return err
+		}
+
+		return nil
+	},
+		retry.WithRetryIntervalSec(1),
+		retry.WithRetryTimoutSec(int(o.TimeoutSec)),
+		retry.WithLogger(log),
+	); err != nil {
+		if errs.IsAny(err, retry.ErrTimeout) {
+			log.V(1).Info("sync operation is timed out")
+			return ErrSyncOperationTimeout
+		}
+
+		return err
+	}
+
+	log.Info("application sync is triggered")
+
+	if err := c.watch(ctx, currentApp, watchOnSync,
+		manager.WithTimeoutSec(o.TimeoutSec),
+		manager.WithLogger(log)); err != nil {
+		return err
+	}
+
+	log.Info("sync operation completed")
+	return nil
 }
 
 func watchOnSync(log logr.Logger, app applicationv1.Application) (bool, error) {

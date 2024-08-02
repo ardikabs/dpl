@@ -21,6 +21,7 @@ func TestRepository_Root(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	r := git.NewGitRepository(gitRepo, getDummyRepoAuth())
+	r, err := git.NewGitRepository(gitRepo, getDummyRepoAuth())
+	assert.NoError(t, err)
 	assert.Equal(t, r.Root(), destDir)
 }

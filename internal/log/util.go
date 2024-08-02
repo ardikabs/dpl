@@ -1,4 +1,4 @@
-package logger
+package log
 
 import (
 	"fmt"
@@ -8,13 +8,7 @@ import (
 	"strings"
 )
 
-var defaultLevel slog.LevelVar
-
-func SetLevel(lvl int) {
-	defaultLevel.Set(slog.Level(-lvl))
-}
-
-func Handler() slog.Handler {
+func newSLogHandler() slog.Handler {
 	opts := &slog.HandlerOptions{
 		Level: &defaultLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {

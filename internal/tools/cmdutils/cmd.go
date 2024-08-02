@@ -52,6 +52,7 @@ func Exec(ctx context.Context, cmd string, opts ...Option) error {
 	}
 
 	if err != nil {
+		log.V(1).Info("command failed for some reason")
 		return errs.Wrap(err, ErrCommandFailed)
 	}
 

@@ -9,6 +9,9 @@ type unwrapper interface {
 	Unwrap() []error
 }
 
+// joinError is a custom error designed to combine multiple errors.
+// It is heavily inspired by how errors.Join works, but it is specifically tailored to display error messages (err.Error()) in a chained format
+// such as "new error: cause of error".
 type joinError struct {
 	err error
 }

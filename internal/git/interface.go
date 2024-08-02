@@ -1,8 +1,6 @@
 package git
 
-import (
-	"golang.org/x/net/context"
-)
+import "context"
 
 type Interface interface {
 	Clone(ctx context.Context, url, dest string, opts ...CloneOption) (Repository, error)

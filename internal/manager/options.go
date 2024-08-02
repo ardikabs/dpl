@@ -12,11 +12,17 @@ type Options struct {
 	MaxRetryUnknownCount int
 }
 
-func NewDefaultOptions() *Options {
-	return &Options{
+func NewDefaultOptions(opts ...Option) *Options {
+	o := &Options{
 		TimeoutSec:           DefaultTimeout,
 		MaxRetryUnknownCount: 5,
 	}
+
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	return o
 }
 
 type Option func(*Options)

@@ -10,7 +10,7 @@ import (
 	kusttypes "sigs.k8s.io/kustomize/api/types"
 )
 
-var _ Renderer = &Kustomize{}
+var _ Interface = &Kustomize{}
 
 var (
 	ErrKustomizeInvalidParams        = errors.New("invalid params type, expecting *KustomizeParams")

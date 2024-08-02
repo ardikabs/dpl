@@ -6,11 +6,10 @@ import (
 	"github.com/ardikabs/dpl/internal/cli/commands/exec"
 	"github.com/ardikabs/dpl/internal/cli/commands/version"
 	"github.com/ardikabs/dpl/internal/cli/global"
-	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
-func New(log logr.Logger) *cobra.Command {
+func New() *cobra.Command {
 	var cmd = &cobra.Command{
 		Use:  "dpl",
 		Long: "dpl is a CLI companion for managing the deployment process of the application to the Kubernetes cluster",
@@ -23,6 +22,6 @@ func New(log logr.Logger) *cobra.Command {
 	global.AttachFlags(cmd.PersistentFlags())
 
 	cmd.AddCommand(version.NewCommand())
-	cmd.AddCommand(exec.NewCommand(log))
+	cmd.AddCommand(exec.NewCommand())
 	return cmd
 }

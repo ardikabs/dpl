@@ -24,7 +24,7 @@ type parameters struct {
 	KustomizationImageRef  string `env:"KUSTOMIZE_IMAGE_REF,default=img"`
 	ArgoCDAuthToken        string `env:"ARGOCD_AUTH_TOKEN"`
 	ArgoCDHost             string `env:"ARGOCD_HOST"`
-	GitSecret              string `env:"GIT_SECRET,required"`
+	GitSecret              string `env:"GIT_SECRET"`
 	IsTriggerRestart       bool
 
 	gitSecret       types.GitSecret
@@ -52,7 +52,7 @@ func (p *parameters) Attach(flagset *flag.FlagSet) error {
 
 func (p *parameters) ParseArgs(args []string) error {
 	if len(args) != 1 {
-		return errors.New("RELEASE_NAME argument is required")
+		return errors.New("either RELEASE_NAME argument is not provided or too many arguments")
 	}
 
 	p.ReleaseName = args[0]

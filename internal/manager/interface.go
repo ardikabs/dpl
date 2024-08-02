@@ -6,7 +6,8 @@ import (
 	"github.com/ardikabs/dpl/internal/types"
 )
 
-type Manager interface {
-	ListReleases(ctx context.Context, req *ListReleaseRequest, opts ...Option) ([]*types.Release, error)
-	SyncReleases(ctx context.Context, rel []*types.Release, opts ...Option) error
+type Interface interface {
+	ListReleases(ctx context.Context, req *ListReleaseRequest, opts ...Option) (types.ListReleases, error)
+	SyncRelease(ctx context.Context, rel *types.Release, opts ...Option) error
+	SyncReleases(ctx context.Context, rels types.ListReleases, opts ...Option) error
 }

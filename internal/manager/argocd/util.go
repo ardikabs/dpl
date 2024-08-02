@@ -11,7 +11,7 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func appsToReleases(req *manager.ListReleaseRequest, apps []applicationv1.Application) ([]*types.Release, error) {
+func appsToReleases(req *manager.ListReleaseRequest, apps []applicationv1.Application) (types.ListReleases, error) {
 	if len(apps) == 0 {
 		return nil, ErrArgoCDApplicationNotExists
 	}

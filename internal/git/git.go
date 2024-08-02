@@ -50,6 +50,5 @@ func (g *Git) Clone(ctx context.Context, url, dest string, opts ...CloneOption) 
 		}
 	}
 
-	r := NewGitRepository(gitRepo, authMethod)
-	return r, nil
+	return NewGitRepository(gitRepo, authMethod)
 }

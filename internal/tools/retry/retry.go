@@ -47,7 +47,7 @@ func OnError(ctx context.Context, retriable RetriableFn, fn func(ctx context.Con
 
 	err := wait.PollUntilContextTimeout(ctx, options.Interval, options.Timeout, false, conditional)
 	if errs.IsAny(err, context.DeadlineExceeded) {
-		return errors.Join(lastErr, ErrTimeout)
+		return errs.Wrap(lastErr, ErrTimeout)
 	}
 
 	return err

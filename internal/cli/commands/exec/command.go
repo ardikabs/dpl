@@ -3,11 +3,12 @@ package exec
 import (
 	"os"
 
-	"github.com/go-logr/logr"
+	"github.com/ardikabs/dpl/internal/cli/global"
+	"github.com/ardikabs/dpl/internal/log"
 	"github.com/spf13/cobra"
 )
 
-func NewCommand(log logr.Logger) *cobra.Command {
+func NewCommand() *cobra.Command {
 	params := new(parameters)
 
 	cmd := &cobra.Command{
@@ -50,7 +51,7 @@ images:
 resources:
   - deployment.yaml
   - service.yaml
-<<EOF
+EOF
 
 # After Rendering
 cat <<EOF > kustomization.yaml
@@ -65,7 +66,7 @@ images:
 resources:
   - deployment.yaml
   - service.yaml
-<<EOF
+EOF
 
 Finally, it will commit and push the changes to the remote repository,
 and trigger a sync to the ArgoCD Application.
@@ -77,7 +78,7 @@ $ dpl exec --environment staging --image ghcr.io/ardikabs/app/myapp:latest myapp
 
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	cmd.RunE = runner(params, log)
+	cmd.RunE = runner(params)
 
 	if err := params.Attach(cmd.Flags()); err != nil {
 		log.Error(err, "failed to attach command flags")
@@ -85,4 +86,25 @@ $ dpl exec --environment staging --image ghcr.io/ardikabs/app/myapp:latest myapp
 	}
 
 	return cmd
+}
+
+func runner(params *parameters) func(cmd *cobra.Command, args []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		log.SetLevel(global.GetLogLevel())
+
+		if err := params.ParseArgs(args); err != nil {
+			return err
+		}
+
+		if err := params.Validate(); err != nil {
+			return err
+		}
+
+		instance, err := newExecInstance(log.Logger, params)
+		if err != nil {
+			return err
+		}
+
+		return instance.Exec(cmd.Context())
+	}
 }
