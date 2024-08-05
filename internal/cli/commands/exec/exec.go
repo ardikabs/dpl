@@ -118,7 +118,7 @@ func (ins *execInstance) Exec(ctx context.Context) error {
 
 	if err := repo.Commit(ctx,
 		git.WithCommitMessage(fmt.Sprintf("dpl(%s): update deployment manifest", reqID)),
-		git.WithCommitter("kadabra-bot", "me@ardikabs"),
+		git.WithCommitter("autobot", "me@ardikabs"),
 		git.WithCommitPath("."),
 		git.WithCommitLogger(log),
 	); err != nil {

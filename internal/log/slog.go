@@ -13,7 +13,7 @@ func newSLogHandler() slog.Handler {
 		Level: &defaultLevel,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == "level" {
-				return replaceLogLevelAttr(a)
+				return replaceSLogLevelAttr(a)
 			}
 			return a
 		},
@@ -22,7 +22,7 @@ func newSLogHandler() slog.Handler {
 	return slog.NewTextHandler(os.Stdout, opts)
 }
 
-func replaceLogLevelAttr(lvl slog.Attr) slog.Attr {
+func replaceSLogLevelAttr(lvl slog.Attr) slog.Attr {
 	lvl.Key = "v"
 	lvl.Value = slog.AnyValue(replaceDebugLevel(lvl.Value.String()))
 	return lvl

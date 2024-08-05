@@ -8,3 +8,5 @@ bin/**
 .idea
 *.html
 output/
+.envrc
+.vscode
